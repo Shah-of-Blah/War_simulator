@@ -1,0 +1,532 @@
+---
+title: "VF Forecasting"
+author: "Brady Thompson"
+date: "11/21/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Description of the project
+
+Given two data sets $\texttt{sales.txt}$ and $\texttt{item_size.txt}$, out goal is to provide a 52-week demand forcast. We first import, clean, and transform the data that will facilite time-series analysis. 
+```{r, echo=TRUE, results = 'hide',warning=FALSE}
+size = read.delim('item_size.txt', header = TRUE, sep = "|", dec = ".")
+sales = read.delim('sales.txt',header = TRUE, sep = "|", dec =".")
+
+#Make the transaction_date a date variable
+sales$transaction_date = as.Date(sales$transaction_date)
+```
+We take an initial look at a sample of each data, and a histogram of transaction dates binned into week.
+```{r, echo=TRUE}
+head(size)
+head(sales)
+```
+
+```{r}
+#Histogram of Sales since 2015
+hist(sales$transaction_date, "weeks", freq=TRUE, main = "Histogram of Transaction Date", xlab="Transaction Date")
+```
+
+# Cleaning the data
+We notice many of the lines in the sales data involve TAX. In these lines contribute no meaningful information and so we remove them.
+```{r}
+#Remove the TAX entries
+sales = sales[sales$item_code !="TAX",]
+```
+
+Examining the counts of transaction quantity we can examine any patterns in the outliers. 
+```{r}
+as.data.frame(table(sales$transaction_quantity))
+```
+We see that overwhelimingly, each transaction accounts for the purchase of one product, and very few purchase more than 4 in a single transaction. Let's examine the dates of these large purchases. 
+```{r}
+sales[sales$transaction_quantity>7,]
+```
+We see that almost all of these major purchases happen between March 25th 2019 and April 9th 2019. What was going on during these day? The North Face and Supreme collaboration. We also remove 3 other extreme purchases that appear erroneous. 
+
+```{r}
+#Remove Supreme/North Face Colab
+sales  = sales[!(sales$transaction_quantity>2 & sales$transaction_date <= "2019-04-10" & sales$transaction_date >= "2019-03-20"),]
+
+#Remove Sales with more than 6, only 3 exist, and they seem erroneous. Also, returns with more than 1 (only one instance).
+sales = sales[sales$transaction_quantity<=6,]
+sales = sales[!(sales$transaction_quantity <=-2),]
+```
+
+#Group the data into week's
+Because we are making a 52-week forecast, we need to collapse all the observations that appear in each week into a single observation. We label each observation with a new column corresponding to the previous (or current) Sunday using the $\texttt{floor_date} function. 
+
+```{r}
+library(lubridate)
+dates <- sales$transaction_date
+week_start_date = floor_date(sales$transaction_date , "weeks") 
+sales = cbind(sales, week_start_date)
+```
+
+# Transforming The Data
+We want to transform the data to be useful for time-series analysis. We want to have a column for the date, and a column for the total transaction quantity. We will do this for both stores, and total sales. This will result in 3 data sets that we write out to both .csv and .txt files. We begin with Store 1, which corresponds to the discount store. These 3 data sets do not include any size data. 
+
+```{r}
+#Store 1 Sales Data
+store1_weekly_transactions = data.frame(matrix(0, ncol = 1, nrow = length(unique(week_start_date))))
+names(store1_weekly_transactions) = c("transaction_quantity")
+r = 1
+for (j in 1:length(unique(week_start_date)))
+{
+  store1_weekly_transactions[r,1] = sum(sales[sales$week_start_date == unique(week_start_date)[j] & sales$store == 1,]$transaction_quantity)
+  r = r+1
+}
+
+store = c(rep(1,length(unique(week_start_date))))
+store1_weekly_transactions = cbind(store, unique(week_start_date), store1_weekly_transactions)
+names(store1_weekly_transactions) = c("store","week_start_date", "transaction_quantity")
+store1_weekly_transactions = store1_weekly_transactions[order(store1_weekly_transactions$week_start_date),]
+
+write.csv(store1_weekly_transactions,"discount_without_size.csv",row.names = FALSE)
+write.table(store1_weekly_transactions, "discount_without_size.txt", append = FALSE, sep = "\t", dec = ".",row.names = FALSE, col.names = TRUE)
+```
+Let's view a sample of this new data set. 
+```{r}
+head(store1_weekly_transactions)
+```
+Similarly, but for store 2, which corresponds to the regular store. 
+```{r}
+#Store 2 sales data
+store2_weekly_transactions = data.frame(matrix(0, ncol = 1, nrow = length(unique(week_start_date))))
+names(store2_weekly_transactions) = c("transaction_quantity")
+r = 1
+for (j in 1:length(unique(week_start_date)))
+{
+  store2_weekly_transactions[r,1] = sum(sales[sales$week_start_date == unique(week_start_date)[j] & sales$store == 2,]$transaction_quantity)
+  r = r+1
+}
+
+store = c(rep(2,length(unique(week_start_date))))
+store2_weekly_transactions = cbind(store, unique(week_start_date),store2_weekly_transactions)
+names(store2_weekly_transactions) = c("store", "week_start_date", "transaction_quantity")
+store2_weekly_transactions = store2_weekly_transactions[order(store2_weekly_transactions$week_start_date),]
+
+head(store2_weekly_transactions)
+
+write.csv(store2_weekly_transactions,"regular_without_size.csv",row.names = FALSE)
+write.table(store2_weekly_transactions, "regular_without_size.txt", append = FALSE, sep = "\t", dec = ".",row.names = FALSE, col.names = TRUE)
+```
+
+We lastly do a combined analysis where we don't separate by store, and get total sales accross both stores. 
+```{r}
+#Total sales data
+total_weekly_transactions = data.frame(matrix(0, ncol = 1, nrow = length(unique(week_start_date))))
+names(total_weekly_transactions) = c("transaction_quantity")
+r = 1
+for (j in 1:length(unique(week_start_date)))
+{
+  total_weekly_transactions[r,1] = sum(sales[sales$week_start_date == unique(week_start_date)[j],]$transaction_quantity)
+  r = r+1
+}
+
+total_weekly_transactions = cbind(unique(week_start_date), total_weekly_transactions)
+names(total_weekly_transactions) = c("week_start_date","transaction_quantity")
+total_weekly_transactions = total_weekly_transactions[order(total_weekly_transactions$week_start_date),]
+
+head(total_weekly_transactions)
+
+write.csv(total_weekly_transactions,"total_without_size.csv",row.names = FALSE)
+write.table(total_weekly_transactions, "total_without_size.txt", append = FALSE, sep = "\t", dec = ".",row.names = FALSE, col.names = TRUE)
+```
+
+We will now create 3 more data set where we get a different column for each size. That is, for each week (a row) we get the total transactions for each size. At this point it is important that we make an observations. The number of unique item_codes in the sales data is:
+```{r}
+length(unique(sales$item_code))
+```
+While the number of unique item_codes in the size data is:
+```{r}
+length(unique(size$item_code))
+```
+We see that there are many more unique items in the sales data than in the size data. This could mean a number of things. 1) The sales data is not just mens coats, but rather an item sold at the north face store, e.g. shirts, backpacks, hats. Including things that simply don't have any particular size. 2) The sales data is has coats that are not contained in the size data. Given that the description of the problem indicated that the item_code in the sales data was the "Unique identifier for men’s insulated jackets", I will option number 2. 
+
+Since many of the coats in the sales data do not have recorded sizes, when we merge $\texttt{size}$ and $\texttt{sales}$, we only keep the records which have sizes, thus schrinking out dataset considerably. 
+
+For this transformation we run a nested for loop to get all the transactions for each week and for each size. We do this for store 1, store 2, and total sales, producing 3 more data sets. 
+
+```{r}
+#Get sales data with size column
+sales.plus.size = merge(x=sales, y=size, by="item_code")
+
+#Store 1 + sizes
+store1_weekly_transactions.plus.size = data.frame(matrix(0, ncol = length(unique(sales.plus.size$item_size)), nrow = length(unique(week_start_date))))
+
+r = 1
+for (j in 1:length(unique(week_start_date)))
+{
+  c=1
+  for (k in 1:length(unique(sales.plus.size$item_size)))
+  {
+    store1_weekly_transactions.plus.size[r,c] = sum(sales.plus.size[sales.plus.size$week_start_date == unique(week_start_date)[j] & sales.plus.size$item_size ==unique(sales.plus.size$item_size)[k] & sales.plus.size$store ==1 ,]$transaction_quantity)
+    c = c+1
+  }
+  r=r+1
+}
+
+store1_weekly_transactions.plus.size = cbind(unique(week_start_date), store1_weekly_transactions.plus.size)
+names(store1_weekly_transactions.plus.size) = c("week_start_date",sapply(unique(sales.plus.size$item_size),toString))
+store1_weekly_transactions.plus.size = store1_weekly_transactions.plus.size[order(store1_weekly_transactions.plus.size$week_start_date),]
+
+head(store1_weekly_transactions.plus.size)
+
+write.csv(store1_weekly_transactions.plus.size,"discount_with_size.csv",row.names = FALSE)
+write.table(store1_weekly_transactions.plus.size, "discount_with_size.txt", append = FALSE, sep = "\t", dec = ".",row.names = FALSE, col.names = TRUE)
+```
+Similarly for store 2. 
+
+```{r}
+#Store 2 + sizes
+store2_weekly_transactions.plus.size = data.frame(matrix(0, ncol = length(unique(sales.plus.size$item_size)), nrow = length(unique(week_start_date))))
+
+r = 1
+for (j in 1:length(unique(week_start_date)))
+{
+  c=1
+  for (k in 1:length(unique(sales.plus.size$item_size)))
+  {
+    store2_weekly_transactions.plus.size[r,c] = sum(sales.plus.size[sales.plus.size$week_start_date == unique(week_start_date)[j] & sales.plus.size$item_size ==unique(sales.plus.size$item_size)[k] & sales.plus.size$store ==2,]$transaction_quantity)
+    c = c+1
+  }
+  r=r+1
+}
+
+store2_weekly_transactions.plus.size = cbind(unique(week_start_date), store2_weekly_transactions.plus.size)
+names(store2_weekly_transactions.plus.size) = c("week_start_date",sapply(unique(sales.plus.size$item_size),toString))
+store2_weekly_transactions.plus.size = store2_weekly_transactions.plus.size[order(store2_weekly_transactions.plus.size$week_start_date),]
+
+head(store2_weekly_transactions.plus.size)
+
+write.csv(store2_weekly_transactions.plus.size,"regular_with_size.csv",row.names = FALSE)
+write.table(store2_weekly_transactions.plus.size, "regular_with_size.txt", append = FALSE, sep = "\t", dec = ".",row.names = FALSE, col.names = TRUE)
+```
+
+Lastly, we do the same thing, but for total sales accross both stores. 
+```{r}
+#Total + size
+total_weekly_transactions.plus.size = data.frame(matrix(0, ncol = length(unique(sales.plus.size$item_size)), nrow = length(unique(week_start_date))))
+
+r = 1
+for (j in 1:length(unique(week_start_date)))
+{
+  c=1
+  for (k in 1:length(unique(sales.plus.size$item_size)))
+  {
+    total_weekly_transactions.plus.size[r,c] = sum(sales.plus.size[sales.plus.size$week_start_date == unique(week_start_date)[j] & sales.plus.size$item_size ==unique(sales.plus.size$item_size)[k],]$transaction_quantity)
+    c = c+1
+  }
+  r=r+1
+}
+
+total_weekly_transactions.plus.size = cbind(unique(week_start_date), total_weekly_transactions.plus.size)
+names(total_weekly_transactions.plus.size) = c("week_start_date",sapply(unique(sales.plus.size$item_size),toString))
+total_weekly_transactions.plus.size = total_weekly_transactions.plus.size[order(total_weekly_transactions.plus.size$week_start_date),]
+
+head(total_weekly_transactions.plus.size)
+
+write.csv(total_weekly_transactions.plus.size,"total_with_size.csv",row.names = FALSE)
+write.table(total_weekly_transactions.plus.size, "total_with_size.txt", append = FALSE, sep = "\t", dec = ".",row.names = FALSE, col.names = TRUE)
+```
+
+# Creating a Forecast
+I will create the following model: a 52-week projection for total sales and the distribution of appropriate sizes for each week. Let's first demonstrate a forcast for just the discount store with no consideration of sizing. We will use a seasonal ARIMA model.  
+```{r}
+
+#Load in the data and make it timeseries data. 
+discount_without_size = read.delim('discount_without_size.txt', header = TRUE, sep = "\t", dec = ".")
+ts_dis = ts(discount_without_size$transaction_quantity, start=c(2016,1), freq=52)
+
+#remove the last entry since the week is incomplete. 
+ts_dis.red = ts_dis[1:202]
+
+library(astsa)
+library(forecast)
+```
+We first need to examine what type of differences to take with the data. It is usually the case to take one difference in seasonal trends, and if there is still a positive or negative trend in the data, we take an additional difference between neighboring points, for the purpose of producing a stationary model. In the situation below, we take both types of differences and in the end get what appears to be a stationary series. 
+```{r}
+plot(ts_dis.red, type = "l",main="Transactions From Discount Store", xlab="Week's Since 2016-01-03",ylab="Transactions")
+
+#take seasonal differences
+plot(diff(ts_dis.red,52),type="l",main="Diff(TS,12)", xlab="Week's Since 2016-01-03",ylab="Transactions")
+
+#Still a trend, so take neiboring differences
+plot(diff(diff(ts_dis.red,52)),type="l",main="Diff(Diff(TS,12),1)", xlab="Week's Since 2016-01-03",ylab="Transactions")
+```
+
+Next, we analyze the auto-correlations and partial autocorrelations to determine what our orders for the AR, MA and Seasonal AR and MA should be. A rule of thumb for deciding which orders are to be used in the model is the following: Early spikes in ACF correspond to the order in the MA part. Early spikes in the PACF correspond to the order of the AR part of the model. If we see spikes at the lag correspond to the length of the season (52 in our case), we similarly get the order for the season AR and MA part.
+```{r}
+b = acf2(diff(diff(ts_dis.red,52)), 100)
+```
+
+In our situation we see two early spikes in the ACF an 2 early spikes in PACF, so our non-season parameters can be (2,1,2). We see one spike around lag 52 in both, so our seasonal parameters can be (1,1,1). Running this forecast we get a forecast for 52 weeks and a plot with 80% and 95% CI's. 
+
+```{r, warning=FALSE}
+model = Arima(ts_dis.red, order=c(2,1,2), seasonal=list(order=c(1,1,1), period=52), method="CSS") 
+summary(model)
+forecast(model,h=52)
+
+plot(forecast(model,h=52), main = "Forcast for Discount Store")
+```
+
+Due to the size of the output from the forecast function, I will hide its output for the remainder. Another way we can pick the parameters is to use the auto.arima function which runs a grid search over the parameters and picks the model with the best BIC. This can sometime produce results that might seem suspicious, i.e. no seasonal part. 
+
+```{r,warning=FALSE}
+#this model agrees with a grid search over BIC
+auto.arima(ts_dis)
+```
+We see the auto.arima functions gives the parameters (0,1,2)(1,1,0). We can run this model as well and see a plot. 
+```{r}
+#model choice given by auto.arima. 
+model2 = Arima(ts_dis.red, order=c(0,1,2), seasonal=list(order=c(1,1,0), period=52), method="CSS") 
+
+plot(forecast(model2,h=52), main = "Forcast for Discount Store - Auto.Model")
+```
+
+Now that we've seen the process for how to build a SARIMA model we can begin to build our final demand forecast. 
+
+# Total Sales Forecast
+We proceed just as before. 
+```{r,warning=FALSE}
+#Load in the data and make it timeseries data. 
+total_without_size = read.delim('total_without_size.txt', header = TRUE, sep = "\t", dec = ".")
+ts_tot = ts(discount_without_size$transaction_quantity, start=c(2016,1), freq=52)
+
+#remove the last entry since the week is incomplete. 
+ts_tot.red = ts_tot[1:202]
+
+plot(ts_tot.red, type = "l",main="Total Transactions", xlab="Week's Since 2016-01-03",ylab="Transactions")
+
+#take seasonal differences
+plot(diff(ts_tot.red,52),type="l",main="Diff(TS,12)", xlab="Week's Since 2016-01-03",ylab="Transactions")
+
+#Still a trend, so take neiboring differences
+plot(diff(diff(ts_tot.red,52)),type="l",main="Diff(Diff(TS,12),1)", xlab="Week's Since 2016-01-03",ylab="Transactions")
+b = acf2(diff(diff(ts_tot.red,52)), 100)
+```
+Based on the ACF and PACF plot we get the model parameters should be (2,1,2)(1,1,1)
+```{r,warning=FALSE}
+model = Arima(ts_tot.red, order=c(2,1,2), seasonal=list(order=c(1,1,1), period=52), method="CSS") 
+summary(model)
+plot(forecast(model,h=52), main = "Forcast for Total Sales - My Model")
+```
+
+Using the auto.arima function gives:
+```{r}
+#this model agrees with a grid search over BIC
+auto.arima(ts_tot)
+```
+which gives the parameters (0,1,2)(1,1,0). 
+```{r}
+#model choice given by auto.arima. 
+model2 = Arima(ts_tot.red, order=c(0,1,2), seasonal=list(order=c(1,1,0), period=52), method="CSS") 
+
+plot(forecast(model2,h=52), main = "Forcast for Total Sales - Auto.Model")
+```
+
+### Testing on our training set
+To choose which model to chose, we compare with previous data. We can look at how the models are able to predict the last 52 weeks of the training set. The lines in red are our known training set, and the blue represents our prediction. 
+
+```{r}
+#Load in the data and make it timeseries data. 
+total_without_size = read.delim('total_without_size.txt', header = TRUE, sep = "\t", dec = ".")
+ts_tot = ts(discount_without_size$transaction_quantity, start=c(2016,1), freq=52)
+
+#remove the last entry since the week is incomplete. 
+ts_tot.test = ts_tot[1:150]
+
+model = Arima(ts_tot.test, order=c(2,1,2), seasonal=list(order=c(0,1,1), period=52), method="CSS") 
+summary(model)
+
+plot(forecast(model,h=52), main = "Forcast for Total Sales TEST- My Model")
+lines(ts_tot[1:201], type="l", col="red")
+
+#model choice given by auto.arima. 
+model2 = Arima(ts_tot.test, order=c(0,1,2), seasonal=list(order=c(1,1,0), period=52), method="CSS") 
+
+plot(forecast(model2,h=52), main = "Forcast for Total Store TEST- Auto.Model")
+lines(ts_tot[1:201], type="l", col="red")
+
+myforecast = data.frame(forecast(model,52))
+autoforecast = data.frame(forecast(model2,52))
+
+sum(abs(myforecast$Point.Forecast-ts_tot[151:202]))
+sum(abs(autoforecast$Point.Forecast-ts_tot[151:202]))
+```
+Since the error for the model used by Auto.Arima has a smaller error, we chose it as our 52-week demand forcast. 
+```{r}
+demand_forecast = data.frame(forecast(model2,52))
+```
+
+We now incorporate the size data into our model. My plan for this is the following: Create a 52-week demand forecast for all 8 sizes. Each size, then reprsents a proportion of the total amount of predicted sized transactions. We multiply this proportion by our prediction given in total sales to finally get a prediction number for each size, for each week.
+
+ALL the code for each one of these models is build using the exact same method shown above.
+
+### Large
+```{r,warning=FALSE}
+total_with_size = read.delim('total_with_size.txt', header = TRUE, sep = "\t", dec = ".")
+ts_large = ts(total_with_size$L.REG, start=c(2016,1), freq=52)
+ts_large.red = ts_large[1:202]
+b = acf2(diff(diff(ts_dis.red,52)), 100)
+
+model = Arima(ts_large.red, order=c(2,1,2), seasonal=list(order=c(1,1,1), period=52), method="CSS") 
+summary(model)
+plot(forecast(model,h=52), main = "Forcast for Large Coats - My Model")
+
+auto.arima(ts_large)
+model2 = Arima(ts_large.red, order=c(2,1,1), seasonal=list(order=c(0,1,1), period=52), method="CSS") 
+plot(forecast(model2,h=52), main = "Forcast for Large Store - Auto.Model")
+
+#We choose my model.
+forecast_large = data.frame(forecast(model,h=52))
+demand_forecast = cbind(demand_forecast,forecast_large$Point.Forecast)
+```
+### Medium
+```{r} 
+ts_med = ts(total_with_size$M.REG, start=c(2016,1), freq=52)
+ts_med.red = ts_med[1:202]
+b = acf2(diff(diff(ts_med.red,52)), 100)
+
+model = Arima(ts_med.red, order=c(3,1,2), seasonal=list(order=c(1,1,1), period=52), method="CSS") 
+summary(model)
+plot(forecast(model,h=52), main = "Forcast for Medium Coats - My Model")
+
+auto.arima(ts_med)
+model2 = Arima(ts_med.red, order=c(2,1,2), seasonal=list(order=c(1,1,0), period=52), method="CSS") 
+plot(forecast(model2,h=52), main = "Forcast for Medium Coats - Auto.Model")
+
+forecast_medium = data.frame(forecast(model2,h=52))
+demand_forecast = cbind(demand_forecast, forecast_medium$Point.Forecast)
+```
+### Small
+```{r}
+ts_small = ts(total_with_size$S.REG, start=c(2016,1), freq=52)
+ts_small.red = ts_small[1:202]
+b = acf2(diff(diff(ts_small.red,52)), 100)
+
+model = Arima(ts_small.red, order=c(3,1,1), seasonal=list(order=c(0,1,1), period=52), method="CSS") 
+summary(model)
+plot(forecast(model,h=52), main = "Forcast for Small Coats - My Model")
+
+auto.arima(ts_small)
+model2 = Arima(ts_small.red, order=c(1,0,1), seasonal=list(order=c(0,0,1), period=52), method="CSS") 
+plot(forecast(model2,h=52), main = "Forcast for Small Coats - Auto.Model")
+
+forecast_small = data.frame(forecast(model,h=52))
+demand_forecast = cbind(demand_forecast, forecast_small$Point.Forecast)
+```
+### XL
+```{r}
+ts_XXL = ts(total_with_size$XXL.REG, start=c(2016,1), freq=52)
+ts_XXL.red = ts_XXL[1:202]
+b = acf2(diff(diff(ts_XXL.red,52)), 100)
+
+
+model = Arima(ts_XXL.red, order=c(2,1,1), seasonal=list(order=c(0,1,0), period=52), method="CSS")
+summary(model)
+plot(forecast(model,h=52), main = "Forcast for XXL Coats - My Model")
+
+auto.arima(ts_XXL)
+model2 = Arima(ts_XXL.red, order=c(1,0,1), seasonal=list(order=c(0,1,1), period=52), method="CSS") 
+plot(forecast(model2,h=52), main = "Forcast for XXL Coats - Auto.Model")
+
+forecast_XXL = data.frame(forecast(model,h=52))
+demand_forecast  = cbind(demand_forecast, forecast_XXL$Point.Forecast)
+```
+### XXL
+```{r,warning=FALSE}
+ts_XXL = ts(total_with_size$XXL.REG, start=c(2016,1), freq=52)
+ts_XXL.red = ts_XXL[1:202]
+b = acf2(diff(diff(ts_XXL.red,52)), 100)
+
+model = Arima(ts_XXL.red, order=c(2,1,1), seasonal=list(order=c(0,1,0), period=52), method="CSS")
+summary(model)
+plot(forecast(model,h=52), main = "Forcast for XXL Coats - My Model")
+
+auto.arima(ts_XXL)
+model2 = Arima(ts_XXL.red, order=c(1,0,1), seasonal=list(order=c(0,1,1), period=52), method="CSS")
+plot(forecast(model2,h=52), main = "Forcast for XXL Coats - Auto.Model")
+
+forecast_XXL = data.frame(forecast(model,h=52))
+demand_forecast  = cbind(demand_forecast, forecast_XXL$Point.Forecast)
+```
+
+The last 3 sizes 3XL, XS, and XXS are so infequently bought, that a time-series model is not the best model, and especially not a seasonal arima model. There are few of the coats purchased, and at irregular times, that it makes sense to supply them periodically as necessary. 
+###3XL
+```{r,warning=FALSE}
+ts_3XL = ts(total_with_size$X3XL.REG, start=c(2016,1), freq=52)
+ts_3XL.red = ts_3XL[1:202]
+plot(ts_3XL.red, type = "l", Main = "3XL Transactions", xlab="Week's Since 2016-01-03",ylab="Transactions")
+
+sum(total_with_size$X3XL.REG)/202
+forecast_3XL = c(rep(.4,52))
+forecast_3XL = data.frame(forecast_3XL)
+demand_forecast = cbind(demand_forecast,forecast_3XL)
+```
+
+### XS
+```{r,warning=FALSE} 
+ts_XS = ts(total_with_size$XS.REG, start=c(2016,1), freq=52)
+ts_XS.red = ts_XS[1:202]
+plot(ts_XS.red, type = "l", Main = "XS Transactions", xlab="Week's Since 2016-01-03",ylab="Transactions")
+
+sum(total_with_size$XS.REG)/202
+forecast_XS = c(rep(.827,52))
+forcast_XS = data.frame(forecast_XS)
+demand_forecast = cbind(demand_forecast,forecast_XS )
+```
+
+### XXS
+```{r,warning=FALSE}
+ts_XXS = ts(total_with_size$XXS.REG, start=c(2015,52), freq=52)
+ts_XXS.red = ts_XXS[1:202]
+plot(ts_XXS.red, type = "l",Main = "XS Transactions", xlab="Week's Since 2016-01-03",ylab="Transactions")
+
+sum(ts_XXS.red)/202
+forecast_XXS = c(rep(0.024,52))
+forecast_XXS = data.frame(forecast_XXS)
+demand_forecast = cbind(demand_forecast, forecast_XXS)
+```
+
+We now use these forecasts to create proportions of the total sales allocated to each size. To do this we run a nested for loop. The heart the matter is the function inside the loops. We makes sure the columns are named appropriatedly, and round each prediction to the nearest integer. We write out prediction to a CSV and TXT file. I also have printed the prediction here. 
+
+```{r}
+names(demand_forecast) = c("Total_Sales","Low 80","High 80","Low 95","High 95", "L","M","S","XL","XXL","3XL", "XS", "XXS")
+
+#We now have a demand forcast, but we need a proportional estimate for sizes. 
+size_proportions = data.frame(matrix(0, ncol = 8, nrow = 52))
+for (i in 1:52)
+{
+  for (j in 1:8)
+  {
+    size_proportions[i,j] = (demand_forecast[i,5+j]/sum(demand_forecast[i,6:13]))*demand_forecast[i,1]
+  }
+}
+
+demand_forecast = cbind(demand_forecast$Total_Sales, demand_forecast$`Low 80`, demand_forecast$`High 80`, demand_forecast$`Low 95`, demand_forecast$`High 95`, size_proportions)
+names(demand_forecast) = c("Point Forecast", "Low 80", "High 80", "Low 95", "High 95", "L","M","S","XL","XXL","3XL","XS","XXS")
+demand_forecast = round(demand_forecast)
+
+start = as.Date("2019-11-11")
+dates = c(start)
+for (i in 1:51)
+{
+  dates = c(dates,start+i*7)
+}
+dates = data.frame(dates)
+demand_forecast = cbind(dates,demand_forecast)
+names(demand_forecast) = c("Week_Start_Date","Point_Forecast", "Low_80", "High_80", "Low_95", "High_95", "L","M","S","XL","XXL","3XL","XS","XXS")
+
+write.csv(demand_forecast,"demand_forecast.csv",row.names = FALSE)
+write.table(demand_forecast, "demand_forecast.txt", append = FALSE, sep = "\t", dec = ".",row.names = FALSE, col.names = TRUE)
+
+```
+
+```{r}
+demand_forecast
+```
