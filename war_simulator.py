@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 def standard(winner, loser):
         a = winner[0]
@@ -110,7 +111,7 @@ def game_simulation():
 if __name__ == '__main__':
     winner_data = []
     turns_data = []
-    for i in range(500):
+    for i in tqdm(range(500)):
         winner, turns = game_simulation()
         winner_data.append(winner)
         turns_data.append(turns)
