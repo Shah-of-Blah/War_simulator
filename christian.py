@@ -1,0 +1,1 @@
+print('Christian is cool')
