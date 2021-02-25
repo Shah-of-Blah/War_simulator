@@ -7,3 +7,4 @@ print('how about i add a new line here')
 
 print('fake user adds a line')
 print('fake user adds new line to pulled branch, after PR')
+print('user 2 makes a suggestion')
