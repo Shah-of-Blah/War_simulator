@@ -11,5 +11,5 @@ print('fake_user adds new line, after rebase pull')
 print('user 1 makes a suggestion')
 
 # User 2 wants this line
-
+# User 2 also wants this line
 # User 2 wants to add this features to the code
