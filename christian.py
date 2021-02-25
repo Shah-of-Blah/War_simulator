@@ -10,4 +10,4 @@ print('fake user adds new line to pulled branch, after PR')
 print('fake_user adds new line, after rebase pull')
 print('user 1 makes a suggestion')
 
-# User 1 want this line
+# User 2 wants this line
